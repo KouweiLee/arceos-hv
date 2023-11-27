@@ -1,6 +1,6 @@
 use axalloc::global_allocator;
 use axhal::mem::{PAGE_SIZE_4K, phys_to_virt, virt_to_phys};
-use hypercraft::{HostPhysAddr, HostVirtAddr, HyperCraftHal, HyperResult, VCpu, VM, GuestPhysAddr};
+use hypercraft::{HostPhysAddr, HostVirtAddr, HyperCraftHal, VM, GuestPhysAddr};
 
 use crate::GuestPageTable;
 
