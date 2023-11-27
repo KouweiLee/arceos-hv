@@ -1,9 +1,35 @@
 use axalloc::global_allocator;
 use axhal::mem::{PAGE_SIZE_4K, phys_to_virt, virt_to_phys};
-use hypercraft::{HostPhysAddr, HostVirtAddr, HyperCraftHal, HyperResult, VCpu};
+use hypercraft::{HostPhysAddr, HostVirtAddr, HyperCraftHal, HyperResult, VCpu, VM, GuestPhysAddr};
+
+use crate::GuestPageTable;
 
 #[cfg(target_arch = "x86_64")]
 mod vmx;
+
+
+static mut CURRENT_VM: Option<usize> = None;
+
+pub fn set_current_vm(vm: &VM<HyperCraftHalImpl, GuestPageTable>) {
+    unsafe {
+        CURRENT_VM = Some(vm as *const _ as usize);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn vm_ipa2pa(gpa: GuestPhysAddr) -> HostPhysAddr {
+    unsafe {
+        match CURRENT_VM {
+            Some(vm_addr) => {
+                let vm: *const VM<HyperCraftHalImpl, GuestPageTable> = vm_addr as *const _;
+                (*vm).ipa2pa(gpa).map_or(0, |v| v)
+            },
+            None => {
+                panic!("vm_ipa2pa shouldn't fail");
+            }
+        }
+    }
+}
 
 /// An empty struct to implementate of `HyperCraftHal`
 pub struct HyperCraftHalImpl;

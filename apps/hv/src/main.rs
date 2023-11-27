@@ -11,6 +11,7 @@ use dtb_riscv64::MachineMeta;
 use dtb_aarch64::MachineMeta;
 #[cfg(target_arch = "aarch64")]
 use aarch64_config::GUEST_KERNEL_BASE_VADDR;
+use libax::hv::set_current_vm;
 #[cfg(target_arch = "aarch64")]
 use libax::{
     hv::{
@@ -68,22 +69,25 @@ fn main(hart_id: usize) {
     }
     #[cfg(target_arch = "aarch64")]
     {
-        // boot cpu
+        // 一直到vm.run，都处于EL1
+        // boot cpu. 初始化每个CPU的PerCPU区域，并将boot_id对应PerCPU区域的指针保存在TPIDR_EL1
         PerCpu::<HyperCraftHalImpl>::init(0, 0x4000);   // change to pub const CPU_STACK_SIZE: usize = PAGE_SIZE * 128?
 
         // get current percpu
         let pcpu = PerCpu::<HyperCraftHalImpl>::this_cpu();
 
         // create vcpu, need to change addr for aarch64!
-        let gpt = setup_gpm(0x7000_0000, 0x7020_0000).unwrap();  
+        // dtb和kernel_entry都是真实pa
+        let gpt = setup_gpm(0x7000_0000, 0x7020_0000).unwrap(); // set stage 2 table
         let vcpu = pcpu.create_vcpu(0).unwrap();
         let mut vcpus = VmCpus::new();
 
         // add vcpu into vm
         vcpus.add_vcpu(vcpu).unwrap();
         let mut vm: VM<HyperCraftHalImpl, GuestPageTable> = VM::new(vcpus, gpt, 0).unwrap();
+        // 初始化vm的指定vcpu的各个寄存器的值
         vm.init_vm_vcpu(0, 0x7020_0000, 0x7000_0000);
-
+        set_current_vm(&vm);
         info!("vm run cpu{}", hart_id);
         // suppose hart_id to be 0
         vm.run(0);
@@ -188,6 +192,7 @@ pub fn setup_gpm(dtb: usize) -> Result<GuestPageTable> {
     Ok(gpt)
 }
 
+/// 设置stage 2 page table
 #[cfg(target_arch = "aarch64")]
 pub fn setup_gpm(dtb: usize, kernel_entry: usize) -> Result<GuestPageTable> {
     let mut gpt = GuestPageTable::new()?;

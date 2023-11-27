@@ -40,7 +40,7 @@ mod hv;
 #[cfg(feature = "hv")]
 pub use gpm::GuestPageTable;
 #[cfg(feature = "hv")]
-pub use hv::HyperCraftHalImpl;
+pub use hv::{HyperCraftHalImpl, set_current_vm, vm_ipa2pa};
 
 
 const LOGO: &str = r#"
@@ -175,6 +175,7 @@ pub extern "C" fn rust_main(cpu_id: usize, dtb: usize) -> ! {
 
     #[cfg(any(feature = "fs", feature = "net", feature = "display"))]
     {
+        // search virtio devices
         #[allow(unused_variables)]
         let all_devices = axdriver::init_drivers();
 

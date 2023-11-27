@@ -170,7 +170,6 @@ extern "C" {
 unsafe extern "C" fn _start() -> ! {
     // PC = 0x8_0000
     // X0 = dtb
-    
     #[cfg(not(feature = "hv"))]
     core::arch::asm!("
         mrs     x19, mpidr_el1
@@ -204,7 +203,7 @@ unsafe extern "C" fn _start() -> ! {
         entry = sym crate::platform::rust_entry,
         options(noreturn),
     );
-
+    // 刚进入该函数，在EL2
     // set vbar_el2 for hypervisor.
     #[cfg(feature = "hv")]
     core::arch::asm!("
@@ -219,12 +218,12 @@ unsafe extern "C" fn _start() -> ! {
         mov     sp, x8
 
         bl      {init_boot_page_table}
-        bl      {init_mmu_el2}
+        bl      {init_mmu_el2}          // 设置el2页表
         bl      {init_mmu}              // setup MMU
         bl      {switch_to_el1}         // switch to EL1
         bl      {enable_fp}             // enable fp/neon
 
-        mov     x8, {phys_virt_offset}  // set SP to the high address
+        mov     x8, {phys_virt_offset}  // set SP to the high address. ???offset = 0
         add     sp, sp, x8
 
         mov     x0, x19                 // call rust_entry(cpu_id, dtb)
