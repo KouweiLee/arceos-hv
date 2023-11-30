@@ -95,6 +95,7 @@ dependencies = [
  "fdt",
  "libax",
  "page_table_entry",
+ "spin 0.9.8",
 ]
 
 [[package]]

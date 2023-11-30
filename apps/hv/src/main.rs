@@ -5,39 +5,40 @@ extern crate alloc;
 #[macro_use]
 extern crate libax;
 
-#[cfg(target_arch = "riscv64")]
-use dtb_riscv64::MachineMeta;
-#[cfg(target_arch = "aarch64")]
-use dtb_aarch64::MachineMeta;
 #[cfg(target_arch = "aarch64")]
 use aarch64_config::GUEST_KERNEL_BASE_VADDR;
-use libax::hv::set_current_vm;
 #[cfg(target_arch = "aarch64")]
-use libax::{
-    hv::{
-        self, GuestPageTable, GuestPageTableTrait, HyperCraftHalImpl, PerCpu,
-        Result, VCpu, VmCpus, VM,
-    },
-    info,
-};
+use dtb_aarch64::MachineMeta;
+#[cfg(target_arch = "riscv64")]
+use dtb_riscv64::MachineMeta;
+use libax::hv::set_current_vm;
 #[cfg(not(target_arch = "aarch64"))]
 use libax::{
     hv::{
-        self, GuestPageTable, GuestPageTableTrait, HyperCallMsg, HyperCraftHalImpl, PerCpu, Result,
-        VCpu, VmCpus, VmExitInfo, VM, phys_to_virt,
+        self, phys_to_virt, GuestPageTable, GuestPageTableTrait, HyperCallMsg, HyperCraftHalImpl,
+        PerCpu, Result, VCpu, VmCpus, VmExitInfo, VM,
+    },
+    info,
+};
+#[cfg(target_arch = "aarch64")]
+use libax::{
+    hv::{
+        self, GuestPageTable, GuestPageTableTrait, HyperCraftHalImpl, PerCpu, Result, VCpu, VmCpus,
+        VM,
     },
     info,
 };
 
 use page_table_entry::MappingFlags;
 
-#[cfg(target_arch = "riscv64")]
-mod dtb_riscv64;
-#[cfg(target_arch = "aarch64")]
-mod dtb_aarch64;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_config;
-
+#[cfg(target_arch = "aarch64")]
+mod device;
+#[cfg(target_arch = "aarch64")]
+mod dtb_aarch64;
+#[cfg(target_arch = "riscv64")]
+mod dtb_riscv64;
 #[cfg(target_arch = "x86_64")]
 mod x64;
 
@@ -71,7 +72,7 @@ fn main(hart_id: usize) {
     {
         // 一直到vm.run，都处于EL1
         // boot cpu. 初始化每个CPU的PerCPU区域，并将boot_id对应PerCPU区域的指针保存在TPIDR_EL1
-        PerCpu::<HyperCraftHalImpl>::init(0, 0x4000);   // change to pub const CPU_STACK_SIZE: usize = PAGE_SIZE * 128?
+        PerCpu::<HyperCraftHalImpl>::init(0, 0x4000); // change to pub const CPU_STACK_SIZE: usize = PAGE_SIZE * 128?
 
         // get current percpu
         let pcpu = PerCpu::<HyperCraftHalImpl>::this_cpu();
@@ -89,6 +90,12 @@ fn main(hart_id: usize) {
         vm.init_vm_vcpu(0, 0x7020_0000, 0x7000_0000);
         set_current_vm(&vm);
         info!("vm run cpu{}", hart_id);
+
+        // add virtio devices
+        if !vmm_init_emulated_device() {
+            panic!("vmm_init_emulated_device failed");
+        }
+
         // suppose hart_id to be 0
         vm.run(0);
     }
@@ -113,7 +120,11 @@ fn main(hart_id: usize) {
 
         return;
     }
-    #[cfg(not(any(target_arch = "riscv64", target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(
+        target_arch = "riscv64",
+        target_arch = "x86_64",
+        target_arch = "aarch64"
+    )))]
     {
         panic!("Other arch is not supported yet!")
     }
@@ -197,12 +208,12 @@ pub fn setup_gpm(dtb: usize) -> Result<GuestPageTable> {
 pub fn setup_gpm(dtb: usize, kernel_entry: usize) -> Result<GuestPageTable> {
     let mut gpt = GuestPageTable::new()?;
     let meta = MachineMeta::parse(dtb);
-    /* 
+    /*
     for virtio in meta.virtio.iter() {
         gpt.map_region(
             virtio.base_address,
             virtio.base_address,
-            0x1000, 
+            0x1000,
             MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER,
         )?;
         debug!("finish one virtio");
@@ -215,7 +226,7 @@ pub fn setup_gpm(dtb: usize, kernel_entry: usize) -> Result<GuestPageTable> {
         0x4000,
         MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER,
     )?;
-    
+
     if let Some(pl011) = meta.pl011 {
         gpt.map_region(
             pl011.base_address,
@@ -275,14 +286,14 @@ pub fn setup_gpm(dtb: usize, kernel_entry: usize) -> Result<GuestPageTable> {
         meta.physical_memory_offset,
         meta.physical_memory_offset + meta.physical_memory_size
     );
-    
+
     gpt.map_region(
         meta.physical_memory_offset,
         meta.physical_memory_offset,
         meta.physical_memory_size,
         MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE | MappingFlags::USER,
     )?;
-    
+
     gpt.map_region(
         GUEST_KERNEL_BASE_VADDR,
         kernel_entry,
@@ -290,8 +301,31 @@ pub fn setup_gpm(dtb: usize, kernel_entry: usize) -> Result<GuestPageTable> {
         MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE | MappingFlags::USER,
     )?;
 
-    let gaddr:usize = 0x40_1000_0000;
+    let gaddr: usize = 0x40_1000_0000;
     let paddr = gpt.translate(gaddr).unwrap();
     debug!("this is paddr for 0x{:X}: 0x{:X}", gaddr, paddr);
     Ok(gpt)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn vmm_init_emulated_device() -> bool {
+    use crate::device::{emu_register_dev, emu_virtio_mmio_handler, emu_virtio_mmio_init};
+    use device::VIRTIO_IPA;
+    info!("vmm_init_emulated_device");
+    // blk
+    emu_register_dev(
+        crate::device::EmuDeviceType::EmuDeviceTVirtioBlk,
+        // vm.id(),
+        // idx,
+        // emu_dev.base_ipa,
+        // emu_dev.length,
+        0,
+        VIRTIO_IPA[0],
+        0x1000,
+        emu_virtio_mmio_handler,
+    );
+    if !emu_virtio_mmio_init(0, crate::device::EmuDeviceType::EmuDeviceTVirtioBlk) {
+        return false;
+    }
+    true
 }

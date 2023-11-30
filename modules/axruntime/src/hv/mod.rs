@@ -1,12 +1,11 @@
 use axalloc::global_allocator;
-use axhal::mem::{PAGE_SIZE_4K, phys_to_virt, virt_to_phys};
-use hypercraft::{HostPhysAddr, HostVirtAddr, HyperCraftHal, VM, GuestPhysAddr};
+use axhal::mem::{phys_to_virt, virt_to_phys, PAGE_SIZE_4K};
+use hypercraft::{GuestPhysAddr, HostPhysAddr, HostVirtAddr, HyperCraftHal, VM};
 
 use crate::GuestPageTable;
 
 #[cfg(target_arch = "x86_64")]
 mod vmx;
-
 
 static mut CURRENT_VM: Option<usize> = None;
 
@@ -16,14 +15,13 @@ pub fn set_current_vm(vm: &VM<HyperCraftHalImpl, GuestPageTable>) {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn vm_ipa2pa(gpa: GuestPhysAddr) -> HostPhysAddr {
+pub fn vm_ipa2pa(gpa: GuestPhysAddr) -> HostPhysAddr {
     unsafe {
         match CURRENT_VM {
             Some(vm_addr) => {
                 let vm: *const VM<HyperCraftHalImpl, GuestPageTable> = vm_addr as *const _;
                 (*vm).ipa2pa(gpa).map_or(0, |v| v)
-            },
+            }
             None => {
                 panic!("vm_ipa2pa shouldn't fail");
             }
@@ -62,7 +60,7 @@ impl HyperCraftHal for HyperCraftHalImpl {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn current_time_nanos() -> u64 { 
+    fn current_time_nanos() -> u64 {
         axhal::time::current_time_nanos()
     }
 }

@@ -40,8 +40,7 @@ mod hv;
 #[cfg(feature = "hv")]
 pub use gpm::GuestPageTable;
 #[cfg(feature = "hv")]
-pub use hv::{HyperCraftHalImpl, set_current_vm, vm_ipa2pa};
-
+pub use hv::{set_current_vm, vm_ipa2pa, HyperCraftHalImpl};
 
 const LOGO: &str = r#"
        d8888                            .d88888b.   .d8888b.
@@ -304,7 +303,7 @@ fn init_interrupt() {
         axtask::on_timer_tick();
     });
 
-    /* 
+    /*
     #[cfg(all(feature = "hv", target_arch = "aarch64"))]
     {
         hv::interrupt_register_for_aarch64_hv();
